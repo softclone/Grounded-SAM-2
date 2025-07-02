@@ -52,6 +52,10 @@ frame_names = [
     if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
 ]
 frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
+# Limit processing to the first two frames to reduce GPU memory usage during
+# testing. This keeps the example lightweight while demonstrating the
+# tracking pipeline.
+frame_names = frame_names[:2]
 
 # init video predictor state
 inference_state = video_predictor.init_state(video_path=video_dir)
@@ -153,7 +157,9 @@ else:
 Step 4: Propagate the video predictor to get the segmentation results for each frame
 """
 video_segments = {}  # video_segments contains the per-frame segmentation results
-for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
+for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(
+    inference_state, max_frame_num_to_track=len(frame_names)
+):
     video_segments[out_frame_idx] = {
         out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
         for i, out_obj_id in enumerate(out_obj_ids)
@@ -188,6 +194,19 @@ for frame_idx, segments in video_segments.items():
     mask_annotator = sv.MaskAnnotator()
     annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
     cv2.imwrite(os.path.join(save_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
+
+    # Save individual object masks and their composites
+    per_obj_dir = os.path.join(save_dir, f"frame_{frame_idx:05d}")
+    os.makedirs(per_obj_dir, exist_ok=True)
+    for obj_id, mask in zip(object_ids, masks):
+        mask_uint8 = (mask * 255).astype(np.uint8)
+        cv2.imwrite(
+            os.path.join(per_obj_dir, f"mask_{obj_id:02d}.png"), mask_uint8
+        )
+        masked_img = cv2.bitwise_and(img, img, mask=mask_uint8)
+        cv2.imwrite(
+            os.path.join(per_obj_dir, f"object_{obj_id:02d}.png"), masked_img
+        )
 
 
 """
